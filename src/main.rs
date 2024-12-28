@@ -5,6 +5,7 @@ use std::error::Error;
 use std::num::ParseIntError;
 use std::process::exit;
 use std::{env, fs};
+use clap::ArgAction;
 use clap::{Arg, Command, builder::PathBufValueParser};
 use crc::{Crc, CRC_32_ISO_HDLC};
 use glob::Pattern;
@@ -19,10 +20,18 @@ enum UserChoice {
     EXIT
 }
 
-fn delete_files(files: &Vec<DirEntry>, delete_indices: Vec<u64>) {
+fn delete_files(files: &Vec<DirEntry>, delete_indices: Vec<u64>, use_trash: bool) {
     for index in delete_indices {
         let file = files.get(index as usize).unwrap();
-        if let Ok(_) = fs::remove_file(file.path()) {
+        let delete_result;
+        if use_trash {
+            // Move file to trash
+            delete_result = trash::delete(file.path()).ok();
+        } else {
+            // Directly delete file
+            delete_result = fs::remove_file(file.path()).ok();
+        }
+        if let Some(_) = delete_result {
             println!("Deleted {}...", file.path().to_string_lossy());
         } else {
             println!("Failed to delete {}!", file.path().to_string_lossy());
@@ -92,16 +101,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             .help("List of patterns to exclude")
             .value_delimiter(',')
         )
+        .arg(Arg::new("use_trash")
+            .short('t')
+            .long("use-trash")
+            .help("Move deleted files to the system trash")
+            .action(ArgAction::SetTrue)
+        )
         .get_matches();
     
     let default_dir = env::current_dir()?;
     let directory = arguments.get_one("directory").unwrap_or(&default_dir);
-    
     let exclude_patterns: Vec<Pattern> = arguments
         .get_many::<String>("exclude")
         .unwrap_or_default()
         .filter_map(|pattern| Pattern::new(pattern).ok())
         .collect();
+    let use_trash = arguments.get_flag("use_trash"); 
 
     println!("Searching '{}' for duplicate files...", directory.to_str().unwrap());
 
@@ -159,7 +174,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             loop {
                 println!("\nPotential duplicate ({}/{})", index + 1, total_duplicates);
                 match prompt_user(files)? {
-                    UserChoice::KEEP(delete_indices) => {delete_files(files, delete_indices); break; },
+                    UserChoice::KEEP(delete_indices) => {delete_files(files, delete_indices, use_trash); break; },
                     UserChoice::SKIP => break,
                     UserChoice::INVALID => continue,
                     UserChoice::EXIT => exit(0),
