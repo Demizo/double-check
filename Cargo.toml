@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 chrono = "0.4.39"
 clap = "4.5.23"
+crc = "3.2.1"
 walkdir = "2.5.0"
