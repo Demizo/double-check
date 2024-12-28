@@ -7,6 +7,7 @@ use std::process::exit;
 use std::{env, fs};
 use clap::{Arg, Command, builder::PathBufValueParser};
 use crc::{Crc, CRC_32_ISO_HDLC};
+use glob::Pattern;
 use walkdir::{DirEntry, WalkDir};
 
 const CHECK_SIZE: i64 = 100000;
@@ -85,10 +86,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             .help("The root directory to search from")
             .value_parser(PathBufValueParser::default())
         )
+        .arg(Arg::new("exclude")
+            .short('e')
+            .long("exclude")
+            .help("List of patterns to exclude")
+            .value_delimiter(',')
+        )
         .get_matches();
     
     let default_dir = env::current_dir()?;
     let directory = arguments.get_one("directory").unwrap_or(&default_dir);
+    
+    let exclude_patterns: Vec<Pattern> = arguments
+        .get_many::<String>("exclude")
+        .unwrap_or_default()
+        .filter_map(|pattern| Pattern::new(pattern).ok())
+        .collect();
 
     println!("Searching '{}' for duplicate files...", directory.to_str().unwrap());
 
@@ -98,6 +111,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             .into_iter()
             .filter_map(Result::ok)
             .filter(|e| !e.file_type().is_dir()) {
+                // Skip excluded files
+                if exclude_patterns.iter().any(|pattern| pattern.matches_path(file.path())) {
+                    continue;
+                }
+
                 let file_size = file_sizes.entry(file.metadata()?.len()).or_insert(Vec::new());  
                 file_size.push(file);
             }
