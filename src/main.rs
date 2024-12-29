@@ -5,6 +5,7 @@ use std::error::Error;
 use std::num::ParseIntError;
 use std::process::exit;
 use std::{env, fs};
+use chrono::{DateTime, Local};
 use clap::ArgAction;
 use clap::{Arg, Command, builder::PathBufValueParser};
 use crc::{Crc, CRC_32_ISO_HDLC};
@@ -70,7 +71,9 @@ fn prompt_user(files: &Vec<DirEntry>) -> std::io::Result<UserChoice> {
         for file in files {
             let bytes = fs::read(file.path())?;
             let hash = sha256::digest(bytes);
-            println!("{}: {}", file.path().to_string_lossy(), hash);
+            let datetime: DateTime<Local> = file.metadata().unwrap().modified().unwrap().into();
+            println!("{}:", file.path().to_string_lossy());
+            println!("Sha256 Hash: {}, Modified Time: {}", hash, datetime.format("%Y-%m-%d %H:%M:%S"));
         }
         return Ok(UserChoice::CHECK);
     }
