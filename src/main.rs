@@ -16,6 +16,7 @@ const CHECK_SIZE: i64 = 100000;
 enum UserChoice {
     KEEP(Vec<u64>),
     SKIP,
+    CHECK,
     INVALID,
     EXIT
 }
@@ -49,6 +50,8 @@ fn prompt_user(files: &Vec<DirEntry>) -> std::io::Result<UserChoice> {
         );
     }
     println!("none: (default)");
+    println!("--------------------------------------------------");
+    println!("check: verify the full file contents are identical");
 
     print!("\nEnter the index (or indices) of files to DELETE (comma-separated): ");
     std::io::stdout().flush()?; // Flush the output to ensure prompt is displayed
@@ -60,6 +63,16 @@ fn prompt_user(files: &Vec<DirEntry>) -> std::io::Result<UserChoice> {
     if input.is_empty() || input.eq("none") {
         println!("Skipping: All files kept");
         return Ok(UserChoice::SKIP);
+    }
+
+    if input.eq("check") {
+        println!("Checking file hashes...");
+        for file in files {
+            let bytes = fs::read(file.path())?;
+            let hash = sha256::digest(bytes);
+            println!("{}: {}", file.path().to_string_lossy(), hash);
+        }
+        return Ok(UserChoice::CHECK);
     }
     
     if input.eq("exit") {
@@ -176,6 +189,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 match prompt_user(files)? {
                     UserChoice::KEEP(delete_indices) => {delete_files(files, delete_indices, use_trash); break; },
                     UserChoice::SKIP => break,
+                    UserChoice::CHECK => continue, // The user triggered a check so prompt them again
                     UserChoice::INVALID => continue,
                     UserChoice::EXIT => exit(0),
                 }
