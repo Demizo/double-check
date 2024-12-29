@@ -43,11 +43,12 @@ fn delete_files(files: &Vec<DirEntry>, delete_indices: Vec<u64>, use_trash: bool
 
 fn prompt_user(files: &Vec<DirEntry>) -> std::io::Result<UserChoice> {
     for (index, file) in files.iter().enumerate() {
-        let file_uri = format!("file:///{}", file.path().parent().unwrap().to_string_lossy().replace('\\', "/"));
+        let file_uri = format!("file:///{}", file.path().to_string_lossy().replace('\\', "/"));
+        let folder_uri = format!("file:///{}", file.path().parent().unwrap().to_string_lossy().replace('\\', "/"));
         // Print as URI link
         println!(
-            "{}: \x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\",
-            index, file_uri, file.path().to_string_lossy()
+            "{}: \x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\ [\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\]",
+            index, file_uri, file.path().to_string_lossy(), folder_uri, "Open Folder"
         );
     }
     println!("none: (default)");
