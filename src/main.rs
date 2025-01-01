@@ -106,8 +106,8 @@ fn prompt_user(files: &Vec<DirEntry>) -> std::io::Result<UserChoice> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let arguments = Command::new("Duplicate Finder")
-        .version("0.0.1")
+    let arguments = Command::new("Double-Check")
+        .version("1.0.0")
         .about("Finds duplicate files")
         .arg(
             Arg::new("directory")
