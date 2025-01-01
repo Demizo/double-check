@@ -17,7 +17,6 @@ const CHECK_SIZE: i64 = 100000;
 enum UserChoice {
     KEEP(Vec<u64>),
     SKIP,
-    CHECK,
     INVALID,
     EXIT,
 }
@@ -34,9 +33,9 @@ fn delete_files(files: &Vec<DirEntry>, delete_indices: Vec<u64>, use_trash: bool
             delete_result = fs::remove_file(file.path()).ok();
         }
         if let Some(_) = delete_result {
-            println!("Deleted {}...", file.path().to_string_lossy());
+            println!("Deleted: {}", file.path().to_string_lossy());
         } else {
-            println!("Failed to delete {}!", file.path().to_string_lossy());
+            println!("Error: Failed to delete {}!", file.path().to_string_lossy());
         }
     }
 }
@@ -64,37 +63,22 @@ fn prompt_user(files: &Vec<DirEntry>) -> std::io::Result<UserChoice> {
             folder_uri,
             "Open Folder"
         );
-    }
-    println!("none: (default)");
-    println!("--------------------------------------------------");
-    println!("check: verify the full file contents are identical");
 
-    print!("\nEnter the index (or indices) of files to DELETE (comma-separated): ");
+        let datetime: DateTime<Local> = file.metadata().unwrap().modified().unwrap().into();
+        println!("   Modified Time: {}", datetime.format("%Y-%m-%d %H:%M:%S"));
+    }
+
+    print!("\nEnter the index (or indices) of files to DELETE (comma-separated), leave blank to skip: ");
     std::io::stdout().flush()?; // Flush the output to ensure prompt is displayed
 
+    // Get user input
     let mut input = String::new();
     std::io::stdin().read_line(&mut input)?;
     let input = input.trim();
 
-    if input.is_empty() || input.eq("none") {
+    if input.is_empty() {
         println!("Skipping: All files kept");
         return Ok(UserChoice::SKIP);
-    }
-
-    if input.eq("check") {
-        println!("Checking file hashes...");
-        for file in files {
-            let bytes = fs::read(file.path())?;
-            let hash = sha256::digest(bytes);
-            let datetime: DateTime<Local> = file.metadata().unwrap().modified().unwrap().into();
-            println!("{}:", file.path().to_string_lossy());
-            println!(
-                "Sha256 Hash: {}, Modified Time: {}",
-                hash,
-                datetime.format("%Y-%m-%d %H:%M:%S")
-            );
-        }
-        return Ok(UserChoice::CHECK);
     }
 
     if input.eq("exit") {
@@ -162,6 +146,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         directory.to_str().unwrap()
     );
 
+    // Collect all files grouped by size
     let mut file_sizes = HashMap::new();
 
     for file in WalkDir::new(directory)
@@ -189,10 +174,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut duplicates = Vec::new();
     let crc32 = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 
+    // Use partial checksum to narrow in on potential duplicates
     for entry in duplicate_file_sizes {
-        let mut file_checksums = HashMap::new();
+        let mut partial_checksums = HashMap::new();
         for dir_entry in entry.1 {
             let bytes;
+
+            // Calculate full checksum on small files
             if dir_entry.metadata()?.len() <= (CHECK_SIZE * 2).try_into()? {
                 bytes = fs::read(dir_entry.path())?;
             } else {
@@ -208,15 +196,34 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
 
             let checksum = crc32.checksum(&bytes);
-            let checksum_entry = file_checksums.entry(checksum).or_insert(Vec::new());
+            let checksum_entry = partial_checksums.entry(checksum).or_insert(Vec::new());
             checksum_entry.push(dir_entry);
         }
 
-        let duplicate_file_checksums: HashMap<_, _> = file_checksums
+        let duplicate_partial_checksums: HashMap<_, _> = partial_checksums
             .into_iter()
             .filter(|x| x.1.len() > 1)
             .collect();
-        duplicates.extend(duplicate_file_checksums.values().cloned());
+
+        // Calculate the full checksum for all partial matches
+        for entry in duplicate_partial_checksums {
+            let mut file_checksums = HashMap::new();
+
+            for file in entry.1 {
+                let bytes = fs::read(file.path())?;
+                let checksum = crc32.checksum(&bytes);
+
+                let checksum_entry = file_checksums.entry(checksum).or_insert(Vec::new());
+                checksum_entry.push(file);
+            }
+
+            let duplicate_file_checksums: HashMap<_, _> = file_checksums
+                .into_iter()
+                .filter(|x| x.1.len() > 1)
+                .collect();
+
+            duplicates.extend(duplicate_file_checksums.values().cloned());
+        }
     }
 
     let total_duplicates = duplicates.len();
@@ -224,14 +231,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("\nType 'exit' to quit the program...");
         for (index, files) in duplicates.iter().enumerate() {
             loop {
-                println!("\nPotential duplicate ({}/{})", index + 1, total_duplicates);
+                println!(
+                    "\n===== Duplicate ({}/{}) =====",
+                    index + 1,
+                    total_duplicates
+                );
                 match prompt_user(files)? {
                     UserChoice::KEEP(delete_indices) => {
                         delete_files(files, delete_indices, use_trash);
                         break;
                     }
                     UserChoice::SKIP => break,
-                    UserChoice::CHECK => continue, // The user triggered a check so prompt them again
                     UserChoice::INVALID => continue,
                     UserChoice::EXIT => exit(0),
                 }
