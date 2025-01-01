@@ -1,15 +1,15 @@
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use chrono::{DateTime, Local};
+use clap::ArgAction;
+use clap::{builder::PathBufValueParser, Arg, Command};
+use crc::{Crc, CRC_32_ISO_HDLC};
+use glob::Pattern;
 use std::collections::HashMap;
 use std::error::Error;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::num::ParseIntError;
 use std::process::exit;
 use std::{env, fs};
-use chrono::{DateTime, Local};
-use clap::ArgAction;
-use clap::{Arg, Command, builder::PathBufValueParser};
-use crc::{Crc, CRC_32_ISO_HDLC};
-use glob::Pattern;
 use walkdir::{DirEntry, WalkDir};
 
 const CHECK_SIZE: i64 = 100000;
@@ -19,7 +19,7 @@ enum UserChoice {
     SKIP,
     CHECK,
     INVALID,
-    EXIT
+    EXIT,
 }
 
 fn delete_files(files: &Vec<DirEntry>, delete_indices: Vec<u64>, use_trash: bool) {
@@ -43,12 +43,26 @@ fn delete_files(files: &Vec<DirEntry>, delete_indices: Vec<u64>, use_trash: bool
 
 fn prompt_user(files: &Vec<DirEntry>) -> std::io::Result<UserChoice> {
     for (index, file) in files.iter().enumerate() {
-        let file_uri = format!("file:///{}", file.path().to_string_lossy().replace('\\', "/"));
-        let folder_uri = format!("file:///{}", file.path().parent().unwrap().to_string_lossy().replace('\\', "/"));
+        let file_uri = format!(
+            "file:///{}",
+            file.path().to_string_lossy().replace('\\', "/")
+        );
+        let folder_uri = format!(
+            "file:///{}",
+            file.path()
+                .parent()
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        );
         // Print as URI link
         println!(
             "{}: \x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\ [\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\]",
-            index, file_uri, file.path().to_string_lossy(), folder_uri, "Open Folder"
+            index,
+            file_uri,
+            file.path().to_string_lossy(),
+            folder_uri,
+            "Open Folder"
         );
     }
     println!("none: (default)");
@@ -74,11 +88,15 @@ fn prompt_user(files: &Vec<DirEntry>) -> std::io::Result<UserChoice> {
             let hash = sha256::digest(bytes);
             let datetime: DateTime<Local> = file.metadata().unwrap().modified().unwrap().into();
             println!("{}:", file.path().to_string_lossy());
-            println!("Sha256 Hash: {}, Modified Time: {}", hash, datetime.format("%Y-%m-%d %H:%M:%S"));
+            println!(
+                "Sha256 Hash: {}, Modified Time: {}",
+                hash,
+                datetime.format("%Y-%m-%d %H:%M:%S")
+            );
         }
         return Ok(UserChoice::CHECK);
     }
-    
+
     if input.eq("exit") {
         return Ok(UserChoice::EXIT);
     }
@@ -86,18 +104,19 @@ fn prompt_user(files: &Vec<DirEntry>) -> std::io::Result<UserChoice> {
     if let Ok(indices_to_keep) = input
         .split(',')
         .map(|s| s.trim().parse::<u64>())
-        .collect::<Result<Vec<_>, ParseIntError>>() {
-            if indices_to_keep.len() > 0 {
-                for index in indices_to_keep.iter() {
-                    if *index >= files.len().try_into().unwrap() {
-                        println!("Error: {} is an invalid index!", index);
-                        return Ok(UserChoice::INVALID);
-                    }
+        .collect::<Result<Vec<_>, ParseIntError>>()
+    {
+        if indices_to_keep.len() > 0 {
+            for index in indices_to_keep.iter() {
+                if *index >= files.len().try_into().unwrap() {
+                    println!("Error: {} is an invalid index!", index);
+                    return Ok(UserChoice::INVALID);
                 }
-                return Ok(UserChoice::KEEP(indices_to_keep));
             }
+            return Ok(UserChoice::KEEP(indices_to_keep));
         }
-    
+    }
+
     println!("Error: Unknown input!");
     return Ok(UserChoice::INVALID);
 }
@@ -106,26 +125,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     let arguments = Command::new("Duplicate Finder")
         .version("0.0.1")
         .about("Finds duplicate files")
-        .arg(Arg::new("directory")
-            .short('d')
-            .long("directory")
-            .help("The root directory to search from")
-            .value_parser(PathBufValueParser::default())
+        .arg(
+            Arg::new("directory")
+                .short('d')
+                .long("directory")
+                .help("The root directory to search from")
+                .value_parser(PathBufValueParser::default()),
         )
-        .arg(Arg::new("exclude")
-            .short('e')
-            .long("exclude")
-            .help("List of patterns to exclude")
-            .value_delimiter(',')
+        .arg(
+            Arg::new("exclude")
+                .short('e')
+                .long("exclude")
+                .help("List of patterns to exclude")
+                .value_delimiter(','),
         )
-        .arg(Arg::new("use_trash")
-            .short('t')
-            .long("use-trash")
-            .help("Move deleted files to the system trash")
-            .action(ArgAction::SetTrue)
+        .arg(
+            Arg::new("use_trash")
+                .short('t')
+                .long("use-trash")
+                .help("Move deleted files to the system trash")
+                .action(ArgAction::SetTrue),
         )
         .get_matches();
-    
+
     let default_dir = env::current_dir()?;
     let directory = arguments.get_one("directory").unwrap_or(&default_dir);
     let exclude_patterns: Vec<Pattern> = arguments
@@ -133,26 +155,36 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_default()
         .filter_map(|pattern| Pattern::new(pattern).ok())
         .collect();
-    let use_trash = arguments.get_flag("use_trash"); 
+    let use_trash = arguments.get_flag("use_trash");
 
-    println!("Searching '{}' for duplicate files...", directory.to_str().unwrap());
+    println!(
+        "Searching '{}' for duplicate files...",
+        directory.to_str().unwrap()
+    );
 
     let mut file_sizes = HashMap::new();
-    
+
     for file in WalkDir::new(directory)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|e| !e.file_type().is_dir()) {
-                // Skip excluded files
-                if exclude_patterns.iter().any(|pattern| pattern.matches_path(file.path())) {
-                    continue;
-                }
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| !e.file_type().is_dir())
+    {
+        // Skip excluded files
+        if exclude_patterns
+            .iter()
+            .any(|pattern| pattern.matches_path(file.path()))
+        {
+            continue;
+        }
 
-                let file_size = file_sizes.entry(file.metadata()?.len()).or_insert(Vec::new());  
-                file_size.push(file);
-            }
+        let file_size = file_sizes
+            .entry(file.metadata()?.len())
+            .or_insert(Vec::new());
+        file_size.push(file);
+    }
 
-    let duplicate_file_sizes: HashMap<_,_> = file_sizes.into_iter().filter(|x| x.1.len() > 1).collect();
+    let duplicate_file_sizes: HashMap<_, _> =
+        file_sizes.into_iter().filter(|x| x.1.len() > 1).collect();
 
     let mut duplicates = Vec::new();
     let crc32 = Crc::<u32>::new(&CRC_32_ISO_HDLC);
@@ -180,7 +212,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             checksum_entry.push(dir_entry);
         }
 
-        let duplicate_file_checksums: HashMap<_,_> = file_checksums.into_iter().filter(|x| x.1.len() > 1).collect();
+        let duplicate_file_checksums: HashMap<_, _> = file_checksums
+            .into_iter()
+            .filter(|x| x.1.len() > 1)
+            .collect();
         duplicates.extend(duplicate_file_checksums.values().cloned());
     }
 
@@ -191,7 +226,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             loop {
                 println!("\nPotential duplicate ({}/{})", index + 1, total_duplicates);
                 match prompt_user(files)? {
-                    UserChoice::KEEP(delete_indices) => {delete_files(files, delete_indices, use_trash); break; },
+                    UserChoice::KEEP(delete_indices) => {
+                        delete_files(files, delete_indices, use_trash);
+                        break;
+                    }
                     UserChoice::SKIP => break,
                     UserChoice::CHECK => continue, // The user triggered a check so prompt them again
                     UserChoice::INVALID => continue,
